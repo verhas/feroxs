@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{HashSet};
 
 mod input;
 mod lexer;
@@ -13,7 +13,7 @@ fn main() {
         HashSet::from([
             "if", "else", "for", "while", "return", // add all your keywords here
         ]),
-        BTreeSet::from([
+        Vec::from([
            ".", "+", "-", "*", "/", "==", "!=", "<", ">", "<=", ">=", // add all your operators here
         ]),
         LexerConfig {

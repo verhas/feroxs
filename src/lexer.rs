@@ -20,9 +20,9 @@ pub enum LexemeType {
 
 #[derive(Debug)]
 pub enum LexemeValue {
-    integer(i64),
-    float(f64),
-    string(String),
+    Integer(i64),
+    Float(f64),
+    String(String),
     // Add other types as needed
 }
 
@@ -42,7 +42,7 @@ pub struct LexerConfig {
 pub struct Lexer {
     input: Input,
     keywords: HashSet<&'static str>,
-    operators: BTreeSet<&'static str>,
+    operators: Vec<&'static str>,
     config: LexerConfig,
 }
 
@@ -58,7 +58,7 @@ impl Lexer {
     pub fn new(
         input: Input,
         keywords: HashSet<&'static str>,
-        operators: BTreeSet<&'static str>,
+        operators: Vec<&'static str>,
         config: LexerConfig,
     ) -> Self {
         Lexer {
@@ -104,7 +104,7 @@ impl Lexer {
                     if ch.is_alphabetic() || ch == '_' || ch == '$' {
                         return Some(self.parse_identifier_or_keyword());
                     }
-                    if ch.is_digit(10) || ch == '.' {
+                    if ch.is_digit(10) || ch == '.' || ch == '+' || ch == '-' {
                         if let Some(lexeme) = self.parse_number_literal() {
                             return Some(Ok(lexeme));
                         }
@@ -198,18 +198,23 @@ impl Lexer {
     ///
     /// The method resets the input state if an invalid character is encountered, ensuring
     /// parsing robustness for future attempts.
-
     fn parse_number_literal(&mut self) -> Option<Lexeme> {
         let start = self.input.current_byte_index();
         let mut is_float = false;
 
         if let Ok(Some('0')) = self.input.peek_char() {
             self.input.step();
-            if let Ok(Some('x')) = self.input.peek_char() {
+            if let Ok(Some(ch @ 'x') | Some(ch @ 'o') | Some(ch @ 'b')) = self.input.peek_char() {
+                let radix = match ch {
+                    'x' => 16,
+                    'o' => 8,
+                    'b' => 2,
+                    _ => panic!("Invalid radix character"),
+                };
                 self.input.step();
                 // Parse hexadecimal digits
                 while let Ok(Some(ch)) = self.input.peek_char() {
-                    if ch.is_digit(16) {
+                    if ch.is_digit(radix) {
                         self.input.step();
                     } else {
                         break;
@@ -217,10 +222,10 @@ impl Lexer {
                 }
                 let end = self.input.current_byte_index();
                 let slice = self.input.slice(start..end);
-                return if let Ok(value) = i64::from_str_radix(&slice[2..], 16) {
+                return if let Ok(value) = i64::from_str_radix(&slice[2..], radix) {
                     Some(Lexeme {
                         token_type: LexemeType::NumberLiteral,
-                        value: Some(LexemeValue::integer(value)),
+                        value: Some(LexemeValue::Integer(value)),
                         slice,
                         pos: self.input.pos.clone(),
                     })
@@ -228,29 +233,9 @@ impl Lexer {
                     self.input.reset(start);
                     return None;
                 };
-            } else if let Ok(Some('o')) = self.input.peek_char() {
-                self.input.step();
-                // Parse octal digits
-                while let Ok(Some(ch)) = self.input.peek_char() {
-                    if ch >= '0' && ch <= '7' {
-                        self.input.step();
-                    } else {
-                        break;
-                    }
-                }
-                let end = self.input.current_byte_index();
-                let slice = self.input.slice(start..end);
-                if let Ok(value) = i64::from_str_radix(&slice[2..], 8) {
-                    return Some(Lexeme {
-                        token_type: LexemeType::NumberLiteral,
-                        value: Some(LexemeValue::integer(value)),
-                        slice,
-                        pos: self.input.pos.clone(),
-                    });
-                } else {
-                    self.input.reset(start);
-                    return None;
-                }
+            } else {
+                self.input.reset(start);
+                return None;
             }
         }
         // Parse decimal numbers
@@ -259,11 +244,24 @@ impl Lexer {
                 self.input.step();
             } else if ch == '.' {
                 if is_float {
-                    self.input.reset(start);
-                    return None;
+                    // Multiple decimal points are invalid, it stops the parsing
+                    break;
                 }
                 is_float = true;
                 self.input.step();
+            } else if ch == 'e' || ch == 'E' {
+                is_float = true;
+                self.input.step();
+                if let Ok(Some('+') | Some('-')) = self.input.peek_char() {
+                    self.input.step();
+                }
+                while let Ok(Some(ch)) = self.input.peek_char() {
+                    if ch.is_digit(10) {
+                        self.input.step();
+                    } else {
+                        break;
+                    }
+                }
             } else {
                 break;
             }
@@ -274,7 +272,7 @@ impl Lexer {
             if let Ok(value) = slice.parse::<f64>() {
                 return Some(Lexeme {
                     token_type: LexemeType::NumberLiteral,
-                    value: Some(LexemeValue::float(value)),
+                    value: Some(LexemeValue::Float(value)),
                     slice,
                     pos: self.input.pos.clone(),
                 });
@@ -286,7 +284,7 @@ impl Lexer {
             if let Ok(value) = slice.parse::<i64>() {
                 Some(Lexeme {
                     token_type: LexemeType::NumberLiteral,
-                    value: Some(LexemeValue::integer(value)),
+                    value: Some(LexemeValue::Integer(value)),
                     slice,
                     pos: self.input.pos.clone(),
                 })
@@ -359,7 +357,7 @@ impl Lexer {
                 };
                 return Ok(Lexeme {
                     token_type: if triple { LexemeType::TripleDoubleQuotedString } else { LexemeType::DoubleQuotedString },
-                    value: Some(LexemeValue::string(escaped_string)),
+                    value: Some(LexemeValue::String(escaped_string)),
                     slice,
                     pos: self.input.pos.clone(),
                 });
@@ -409,7 +407,7 @@ impl Lexer {
 
         Ok(Lexeme {
             token_type: if triple { LexemeType::TripleSingleQuotedString } else { LexemeType::SingleQuotedString },
-            value: Some(LexemeValue::string(processed_string)),
+            value: Some(LexemeValue::String(processed_string)),
             slice,
             pos: self.input.pos.clone(),
         })
@@ -427,7 +425,7 @@ impl Lexer {
             return None;
         }
 
-        // Determine if it's a parsed or non-parsed here string
+        // Determine if it's a parsed or non-parsed here doc
         let quote_char = match self.input.peek_char() {
             Ok(Some(ch @ '\'')) | Ok(Some(ch @ '"')) => {
                 self.input.step(); // Consume the quote character
@@ -472,7 +470,6 @@ impl Lexer {
         let delimiter = self.input.slice(delimiter_start..delimiter_end);
         self.input.step();
 
-        dbg!("{:?}",&delimiter);
         if quote_char != '\n' {
             // when the delimiter was quoted, then there can be some space after the delimiter
             while let Ok(Some(ch)) = self.input.peek_char() {
@@ -489,7 +486,7 @@ impl Lexer {
         }
 
         if let Ok(None) = self.input.peek_char() {
-            return Some(self.err("unexpected eof while parsing here string"));
+            return Some(self.err("unexpected eof while parsing here doc"));
         }
 
         // Read content lines until we find the delimiter line
@@ -517,13 +514,13 @@ impl Lexer {
                     content.push('\n');
                 }
                 if quote_char == '"' {
-                    // Parsed here string, process escape sequences
+                    // Parsed here doc, process escape sequences
                     match self.process_escapes(line) {
                         Ok(processed_line) => content.push_str(&processed_line),
                         Err(e) => return Some(self.err(e)),
                     }
                 } else {
-                    // Non-parsed here string, use content verbatim
+                    // Non-parsed here doc, use content verbatim
                     content.push_str(line);
                 }
             }
@@ -531,7 +528,7 @@ impl Lexer {
             if !is_end_of_line {
                 // Reached the end of input before finding the delimiter
                 // Handle error
-                return Some(self.err("unexpected end of input while parsing here string"));
+                return Some(self.err("unexpected end of input while parsing here doc"));
             }
         }
 
@@ -540,7 +537,7 @@ impl Lexer {
 
         Some(Ok(Lexeme {
             token_type: LexemeType::HereString,
-            value: Some(LexemeValue::string(content)),
+            value: Some(LexemeValue::String(content)),
             slice,
             pos: start_pos,
         }))
@@ -614,7 +611,7 @@ impl Lexer {
             let op_len = op.len();
             let end = start + op_len;
             if end <= input_end {
-                if &start_string[start..end] == *op {
+                if &start_string[..end-start] == *op {
                     found_op = Some(op);
                     found_op_len = op_len;
                     break; // Since operators are sorted by length, we can break here
@@ -692,7 +689,7 @@ impl Lexer {
 
 #[cfg(test)]
 mod tests {
-    use crate::lexer::LexemeType::{HereString, Newline};
+    use crate::lexer::LexemeType::{HereString, Newline, NumberLiteral, Operator, SingleCharacter};
     use super::*;
 
     impl Lexer {
@@ -700,7 +697,7 @@ mod tests {
             Lexer::new(
                 Input::from_string(r#""#).expect("Could create temp test file."),
                 HashSet::from([]),
-                BTreeSet::from([]),
+                Vec::from([]),
                 LexerConfig {
                     skip_whitespace: true,
                     treat_newline_as_whitespace: true,
@@ -731,9 +728,9 @@ mod tests {
     impl PartialEq for LexemeValue {
         fn eq(&self, other: &Self) -> bool {
             match (self, other) {
-                (LexemeValue::integer(a), LexemeValue::integer(b)) => a == b,
-                (LexemeValue::float(a), LexemeValue::float(b)) => (a - b).abs() < std::f64::EPSILON,
-                (LexemeValue::string(a), LexemeValue::string(b)) => a == b,
+                (LexemeValue::Integer(a), LexemeValue::Integer(b)) => a == b,
+                (LexemeValue::Float(a), LexemeValue::Float(b)) => (a - b).abs() < std::f64::EPSILON,
+                (LexemeValue::String(a), LexemeValue::String(b)) => a == b,
                 _ => false,
             }
         }
@@ -783,38 +780,38 @@ mod tests {
     fn test_here_document(header: &str, doc: &str, footer: &str) {
         let here_doc = &format!("{}\n{}\n{}\n", header, doc, footer)[..];
         let lexer = Lexer::for_test().input(&here_doc).newline_sensitive();
-        test_lexemes(lexer, &[(HereString, Some(LexemeValue::string(doc.to_string())), &here_doc)]);
+        test_lexemes(lexer, &[(HereString, Some(LexemeValue::String(doc.to_string())), &here_doc)]);
     }
 
 
     #[test]
     fn paste_here_string_double_quoted() {
-        test_here_document("<<\"EOF\"", "This is a here string", "EOF");
+        test_here_document("<<\"EOF\"", "This is a here doc", "EOF");
     }
 
     #[test]
     fn paste_here_string_double_quoted_spaces_after() {
-        test_here_document("<<\"EOF\"   \r", "This is a here string", "EOF");
+        test_here_document("<<\"EOF\"   \r", "This is a here doc", "EOF");
     }
 
     #[test]
     fn paste_here_string_no_quoted() {
-        test_here_document("<<EOF", "This is a here string", "EOF");
+        test_here_document("<<EOF", "This is a here doc", "EOF");
     }
 
     #[test]
     fn paste_here_string_single_quoted() {
-        test_here_document("<<'EOF'", "This is a here string", "EOF");
+        test_here_document("<<'EOF'", "This is a here doc", "EOF");
     }
 
     #[test]
     fn paste_here_string_single_quoted_spaces_after() {
-        test_here_document("<<'EOF'   ", "This is a here string", "EOF");
+        test_here_document("<<'EOF'   ", "This is a here doc", "EOF");
     }
 
     #[test]
     fn paste_here_string_single_quoted_spaces_in_closing() {
-        test_here_document("<<'EOF'", "This is a here string", "EOF   ");
+        test_here_document("<<'EOF'", "This is a here doc", "EOF   ");
     }
 
 
@@ -828,23 +825,114 @@ mod tests {
         };
         let string = &format!("{}{}{}", quote, doc, quote)[..];
         let lexer = Lexer::for_test().input(&string).newline_sensitive();
-        test_lexemes(lexer, &[(t, Some(LexemeValue::string(res.to_string())), &string)]);
+        test_lexemes(lexer, &[(t, Some(LexemeValue::String(res.to_string())), &string)]);
     }
 
     #[test]
     fn test_single_quoted_string() {
-        test_quoted_string("'", "This is \\nhere string", "This is \\nhere string");
+        test_quoted_string("'", "This is \\nhere doc", "This is \\nhere doc");
     }
     #[test]
     fn test_double_quoted_string() {
-        test_quoted_string("\"", "This is \\nhere string", "This is \nhere string");
+        test_quoted_string("\"", "This is \\nhere doc", "This is \nhere doc");
     }
     #[test]
     fn test_triple_single_quoted_string() {
-        test_quoted_string("'''", "This is \\nhere string", "This is \\nhere string");
+        test_quoted_string("'''", "This is \\nhere doc", "This is \\nhere doc");
     }
     #[test]
     fn test_triple_double_quoted_string() {
-        test_quoted_string("\"\"\"", "This is \n\\nhere string", "This is \n\nhere string");
+        test_quoted_string("\"\"\"", "This is \n\\nhere doc", "This is \n\nhere doc");
+    }
+
+    fn test_error(string: &str, er: &str) {
+        let mut lexer = Lexer::for_test().input(&string).newline_sensitive();
+        match lexer.next_lexeme() {
+            Some(Err(e)) => {
+                assert_eq!(e.message, er);
+            }
+            _ => panic!("Expected error, but got lexeme"),
+        }
+    }
+
+    #[test]
+    fn terminated_delimiter() {
+        test_error("<<EOF", "unexpected eof in delimiter");
+    }
+    #[test]
+    fn newline_in_dq_delimiter() {
+        test_error("<<\"EOF\nEOR\"\nkabakukk\nEOF", "unexpected newline in delimiter");
+    }
+    #[test]
+    fn newline_in_sq_delimiter() {
+        test_error("<<\'EOF\nEOR'\nkabakukk\nEOF", "unexpected newline in delimiter");
+    }
+    #[test]
+    fn unterminated_here_doc() {
+        test_error("<<\'EOF'\nkabakukk\nFOE", "unexpected end of input while parsing here doc");
+    }
+
+    fn test_parse_integer(string: &str, value: i64) {
+        let lexer = Lexer::for_test().input(&string).newline_sensitive();
+        test_lexemes(lexer, &[(NumberLiteral, Some(LexemeValue::Integer(value)), string)]);
+    }
+
+    #[test]
+    fn parse_666() {
+        test_parse_integer("666", 666);
+    }
+    #[test]
+    fn parse_0x666() {
+        test_parse_integer("0x666", 1638);
+    }
+    #[test]
+    fn parse_0xFE() {
+        test_parse_integer("0xFE", 254);
+    }
+    #[test]
+    fn parse_0o66() {
+        test_parse_integer("0o66", 54);
+    }
+    #[test]
+    fn parse_0b110101() {
+        test_parse_integer("0b110101", 53);
+    }
+
+    fn test_parse_float(string: &str, value: f64) {
+        let lexer = Lexer::for_test().input(&string).newline_sensitive();
+        test_lexemes(lexer, &[(NumberLiteral, Some(LexemeValue::Float(value)), string)]);
+    }
+
+    #[test]
+    fn parse_666point5() {
+        test_parse_float("666.5", 666.5);
+    }
+    #[test]
+    fn parse_666point5E13() {
+        test_parse_float("666.5e13", 666.5E13);
+    }
+    #[test]
+    fn parse_666point5Ep13() {
+        test_parse_float("666.5e13", 666.5E+13);
+    }
+    #[test]
+    fn parse_666point5Em13() {
+        test_parse_float("666.5e-13", 666.5E-13);
+    }
+
+    #[test]
+    fn test_operators() {
+        let lexer = Lexer::for_test().input(r#"+ ++ += - -- -= * *= / /= == != < > <= >= ==="#)
+            .operators(&["++", "+=", "--", "-=", "*=", "/=", "==", "!=", "<=", ">=",
+                "+", "-", "*", "/", "<", ">", ]);
+        test_lexemes(lexer, &[(Operator, None, "+"), (Operator, None, "++"), (Operator, None, "+="),
+            (Operator, None, "-"), (Operator, None, "--"), (Operator, None, "-="),
+            (Operator, None, "*"), (Operator, None, "*="), (Operator, None, "/"),
+            (Operator, None, "/="), (Operator, None, "=="), (Operator, None, "!="),
+            (Operator, None, "<"), (Operator, None, ">"), (Operator, None, "<="),
+            (Operator, None, ">="),
+            (Operator, None, "=="),
+            (SingleCharacter, None, "="),
+        ]);
     }
 }
