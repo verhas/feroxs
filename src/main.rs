@@ -2,6 +2,7 @@ use std::collections::{HashSet};
 
 mod input;
 mod lexer;
+mod lextree;
 
 use input::{Input};
 use crate::lexer::{Lexer, LexerConfig};
@@ -27,7 +28,7 @@ fn main() {
         match lexer.next_lexeme() {
             Some(Ok(lexeme)) => {
                 i += 1;
-                println!("{i}. {:?} : {:?} {}", lexeme.pos, lexeme.token_type, lexeme.slice);
+                println!("{i}. {:?} : {:?} {}", lexeme.pos, lexeme.token_type, lexeme.lex);
             }
             Some(Err(e)) => {
                 println!("Error: {}", e.message);
