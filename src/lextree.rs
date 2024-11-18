@@ -38,10 +38,10 @@ impl LexTreeBuilder {
     ///
     /// # Returns
     /// A new `LexTreeBuilder` instance with the given lexer and parentheses mappings.
-    fn new(lexer: Lexer, parentheses: &[(&str, &str)]) -> LexTreeBuilder {
+    fn new(lexer: Lexer, parentheses: &[(&'static str, &'static str)]) -> LexTreeBuilder {
         LexTreeBuilder {
             lexer,
-            parentheses: HashMap::from(parentheses),
+            parentheses: parentheses.iter().cloned().collect(),
         }
     }
 
@@ -117,3 +117,169 @@ impl LexTreeBuilder {
         Ok(parent)
     }
 }
+
+#[cfg(test)]
+mod lextree_tests {
+    use super::*;
+    use crate::lexer::{Lexer, LexerConfig, LexemeType};
+    use std::collections::{HashSet};
+    use crate::input::Input;
+
+    // Helper function to create a lexer for testing
+    fn create_lexer(input: &str) -> Lexer {
+        let keywords = HashSet::from(["if", "else", "while"]);
+        let operators = vec!["(", ")", "{", "}", "+", "-", "*", "/", "=="];
+        Lexer::new(
+            Input::from_string(input).expect("Failed to create Input"),
+            keywords,
+            operators,
+            LexerConfig {
+                skip_whitespace: true,
+                treat_newline_as_whitespace: true,
+            },
+        )
+    }
+
+    #[test]
+    fn test_simple_expression_tree() {
+        let lexer = create_lexer("if (x == 5) { y = x + 1 }");
+        let mut builder = LexTreeBuilder::new(lexer, &[("(", ")"), ("{", "}")]);
+
+        let tree = builder.build_tree().expect("Failed to build tree");
+
+        assert_eq!(tree.children.len(), 3, "Tree should have 3 main children");
+
+        match &tree.children[0] {
+            Node::Lexeme(lexeme) => {
+                assert_eq!(lexeme.token_type, LexemeType::Keyword);
+                assert_eq!(lexeme.lex, "if");
+            }
+            _ => panic!("Expected 'if' keyword lexeme"),
+        }
+
+        // Checking the nested condition `(x == 5)`
+        if let Node::Tree(condition) = &tree.children[1] {
+            assert_eq!(condition.tree_type.as_ref().unwrap().lex, "(", "Expected '(' opening condition");
+
+            let x_lexeme = match &condition.children[0] {
+                Node::Lexeme(l) => l,
+                _ => panic!("Expected lexeme"),
+            };
+            assert_eq!(x_lexeme.lex, "x", "Expected 'x' lexeme");
+
+            let equal_op = match &condition.children[1] {
+                Node::Lexeme(l) => l,
+                _ => panic!("Expected lexeme"),
+            };
+            assert_eq!(equal_op.lex, "==", "Expected '==' lexeme");
+
+            let five_lexeme = match &condition.children[2] {
+                Node::Lexeme(l) => l,
+                _ => panic!("Expected lexeme"),
+            };
+            assert_eq!(five_lexeme.lex, "5", "Expected '5' lexeme");
+        } else {
+            panic!("Expected subtree for condition");
+        }
+
+        // Checking the nested block `{ y = x + 1 }`
+        if let Node::Tree(block) = &tree.children[2] {
+            assert_eq!(block.tree_type.as_ref().unwrap().lex, "{", "Expected '{{' opening block");
+
+            let y_lexeme = match &block.children[0] {
+                Node::Lexeme(l) => l,
+                _ => panic!("Expected lexeme"),
+            };
+            assert_eq!(y_lexeme.lex, "y", "Expected 'y' lexeme");
+
+            let equal_op = match &block.children[1] {
+                Node::Lexeme(l) => l,
+                _ => panic!("Expected lexeme"),
+            };
+            assert_eq!(equal_op.lex, "=", "Expected '=' lexeme");
+
+            let x_lexeme = match &block.children[2] {
+                Node::Lexeme(l) => l,
+                _ => panic!("Expected lexeme"),
+            };
+            assert_eq!(x_lexeme.lex, "x", "Expected 'x' lexeme");
+
+            let plus_op = match &block.children[3] {
+                Node::Lexeme(l) => l,
+                _ => panic!("Expected lexeme"),
+            };
+            assert_eq!(plus_op.lex, "+", "Expected '+' lexeme");
+
+            let one_lexeme = match &block.children[4] {
+                Node::Lexeme(l) => l,
+                _ => panic!("Expected lexeme"),
+            };
+            assert_eq!(one_lexeme.lex, "1", "Expected '1' lexeme");
+        } else {
+            panic!("Expected subtree for block");
+        }
+    }
+
+    #[test]
+    fn test_nested_parentheses_tree() {
+        let lexer = create_lexer("((x + y) * z)");
+        let mut builder = LexTreeBuilder::new(lexer, &[("(", ")"), ("{", "}")]);
+
+        let tree = builder.build_tree().expect("Failed to build tree");
+
+        assert!(matches!(tree.children[0], Node::Tree(_)), "Expected nested expression tree");
+
+        let level_1 = match &tree.children[0] {
+            Node::Tree(tree) => tree,
+            _ => panic!("Expected subtree"),
+        };
+        assert_eq!(level_1.tree_type.as_ref().unwrap().lex, "(", "Expected outer '('");
+
+        let level_2 = match &level_1.children[0] {
+            Node::Tree(tree) => tree,
+            _ => panic!("Expected inner subtree"),
+        };
+        assert_eq!(level_2.tree_type.as_ref().unwrap().lex, "(", "Expected inner '('");
+
+        let x_lexeme = match &level_2.children[0] {
+            Node::Lexeme(l) => l,
+            _ => panic!("Expected lexeme"),
+        };
+        assert_eq!(x_lexeme.lex, "x", "Expected 'x' lexeme");
+
+        let plus_op = match &level_2.children[1] {
+            Node::Lexeme(l) => l,
+            _ => panic!("Expected lexeme"),
+        };
+        assert_eq!(plus_op.lex, "+", "Expected '+' lexeme");
+
+        let y_lexeme = match &level_2.children[2] {
+            Node::Lexeme(l) => l,
+            _ => panic!("Expected lexeme"),
+        };
+        assert_eq!(y_lexeme.lex, "y", "Expected 'y' lexeme");
+
+        // Check the outermost multiplication
+        let mult_op = match &level_1.children[1] {
+            Node::Lexeme(l) => l,
+            _ => panic!("Expected lexeme"),
+        };
+        assert_eq!(mult_op.lex, "*", "Expected '*' lexeme");
+
+        let z_lexeme = match &level_1.children[2] {
+            Node::Lexeme(l) => l,
+            _ => panic!("Expected lexeme"),
+        };
+        assert_eq!(z_lexeme.lex, "z", "Expected 'z' lexeme");
+    }
+
+    #[test]
+    fn test_unmatched_parentheses_error() {
+        let lexer = create_lexer("(x + (y * z)");
+        let mut builder = LexTreeBuilder::new(lexer, &[("(", ")"), ("{", "}")]);
+
+        let result = builder.build_tree();
+        assert!(result.is_err(), "Expected unmatched parentheses error");
+    }
+}
+

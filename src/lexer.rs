@@ -119,33 +119,29 @@ impl Lexer {
     ///     Err(e) => eprintln!("Error reading line: {}", e),
     /// }
     /// ```
-    pub fn line_direct(&mut self) -> Result<Option<&str>, &str> {
+    pub fn line_direct(&mut self) -> Result<Option<String>, &str> {
         if let Ok(None) = self.input.peek_char() {
             return Ok(None);
         }
         let mut line = String::new();
         loop {
-            match self.input.peek_char() {
-                Ok(Some(ch)) => {
-                    self.input.step();
-                    if ch == '\r' {
-                        continue;
-                    }
-                    if ch == '\n' {
-                        break;
-                    }
-                    line.push(ch);
-                }
-                Ok(None) => {
-                    break;
-                }
-                Err(e) => {
-                    return Err(e);
-                }
+            let ch = match self.input.peek_char() {
+                Ok(Some(ch)) => ch,
+                Ok(None) => break,
+                Err(e) => return Err(e),
+            };
+            self.input.step();
+            if ch == '\r' {
+                continue;
             }
+            if ch == '\n' {
+                break;
+            }
+            line.push(ch);
         }
-        Ok(Some(line.as_str()))
+        Ok(Some(line))
     }
+
 
     /// Fetches the next lexeme from the input.
     pub fn next_lexeme(&mut self) -> Option<LexerResult> {
