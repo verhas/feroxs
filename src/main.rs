@@ -3,6 +3,8 @@ use std::collections::{HashSet};
 mod input;
 mod lexer;
 mod lextree;
+mod expression;
+mod VecWalker;
 
 use input::{Input};
 use crate::lexer::{Lexer, LexerConfig};

@@ -6,3 +6,6 @@ edition = "2021"
 [dependencies]
 memmap2 = "0.9.5"
 tempfile = "3.14.0"
+
+[profile.dev]
+debug = true

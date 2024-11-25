@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use input::{Input, Pos};
 use crate::input;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum LexemeType {
     DoubleQuotedString,
     TripleDoubleQuotedString,
@@ -19,7 +19,7 @@ pub enum LexemeType {
     SingleCharacter,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum LexemeValue {
     Integer(i64),
     Float(f64),
@@ -27,7 +27,7 @@ pub enum LexemeValue {
     // Add other types as needed
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Lexeme {
     pub token_type: LexemeType,
     pub value: Option<LexemeValue>,
@@ -119,16 +119,17 @@ impl Lexer {
     ///     Err(e) => eprintln!("Error reading line: {}", e),
     /// }
     /// ```
-    pub fn line_direct(&mut self) -> Result<Option<String>, &str> {
-        if let Ok(None) = self.input.peek_char() {
+    pub fn line_direct(&mut self) -> Result<Option<String>, String> {
+        let mut next_char = self.input.peek_char();
+        if let Ok(None) = next_char {
             return Ok(None);
         }
         let mut line = String::new();
         loop {
-            let ch = match self.input.peek_char() {
+            let ch = match next_char {
                 Ok(Some(ch)) => ch,
                 Ok(None) => break,
-                Err(e) => return Err(e),
+                Err(e) => return Err(e.to_string()),
             };
             self.input.step();
             if ch == '\r' {
@@ -138,13 +139,14 @@ impl Lexer {
                 break;
             }
             line.push(ch);
+            next_char = self.input.peek_char()
         }
         Ok(Some(line))
     }
 
 
     /// Fetches the next lexeme from the input.
-    pub fn next_lexeme(&mut self) -> Option<LexerResult> {
+    pub fn next_lexeme(&mut self) -> Option<LexerResult<'_>> {
         loop {
             let c = self.input.peek_char();
             match c {
@@ -815,6 +817,14 @@ mod tests {
             self
         }
         fn operators(mut self, op: &[&'static str]) -> Self {
+            let mut i: Option<usize> = None;
+            for op in op {
+                if i.is_some() {
+                    assert!(op.len() <= i.unwrap(), "Operators must be sorted by length");
+                }
+                i = Some(op.len());
+            }
+
             self.operators = op.iter().cloned().collect();
             self
         }
@@ -1031,6 +1041,11 @@ mod tests {
         test_parse_float("666.5e-13", 666.5E-13);
     }
 
+    #[test]
+    #[should_panic]
+    fn test_operators_not_in_order() {
+        let lexer = Lexer::for_test().input("").operators(&[".", "++"]);
+    }
     #[test]
     fn test_operators() {
         let lexer = Lexer::for_test().input(r#"+ ++ += - -- -= * *= / /= == != < > <= >= ==="#)

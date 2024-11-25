@@ -7,7 +7,7 @@ use memmap2::Mmap;
 use tempfile::NamedTempFile;
 
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Pos {
     pub line: usize,
     pub col: usize,
@@ -63,7 +63,7 @@ impl Input {
         })
     }
 
-    pub fn peek_char(&mut self) -> Result<Option<char>, &str> {
+    pub fn peek_char(&mut self) -> Result<Option<char>, String> {
         let c = first_utf8_char(&self.mmap[self.index..]);
         match c {
             Ok(Some((c, len))) => {
@@ -77,7 +77,7 @@ impl Input {
                 self.eof = true;
                 Ok(None)
             }
-            Err(c) => Err(c),
+            Err(c) => Err(c.to_string()),
         }
     }
 
